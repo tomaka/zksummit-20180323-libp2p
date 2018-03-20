@@ -71,7 +71,7 @@ class: center, middle
 - Implementations in Go, JavaScript and Rust (us!)
 - Used by IPFS
 - Will be used by Polkadot and Parity
-- May be used by Ethereum in the future
+- Possibly by Ethereum in the future (discussions are open)
 
 <div style="position: absolute; bottom: 5%; left: 5%;">
 .left[
@@ -120,16 +120,32 @@ In this example, we negotiate the protocol `/plaintext/1.0.0`, then the protocol
 
 ---
 
-# Security layer
+# Protocol negotiation: extensible
 
-The first protocol negotiated when a connection is open is either the security layer.
+The protocol negotiation itself is conducted with the `multistream-select` protocol. The protocol
+negotiation starts by sending the protocol that will be perform the negotiation and its version,
+here `multistream/1.0.0`.
 
-Two are standard: *plaintext* and *secio*.
-Plaintext is just a basic pass-through protocol.
+Therefore the protocol negotiation itself is also fully extensible.
 
-Secio encrypts communications.
+---
 
-After the security layer has been negotiated, the two nodes negotiated other protocols on top of
+# Encryption layer
+
+The first protocol negotiated when a connection is open is the security layer.
+
+Two protocols exist:
+- *plaintext*, a basic pass-through protocol.
+- *secio*, that provides full encryption.
+
+## Secio
+
+The cipher, hash function, and key exchange algorithm are not hardcoded in the protocol, and are
+also negotiated between the two nodes during the *secio* handshake.
+
+## Afterwards
+
+After the security layer has been negotiated, the two nodes can negotiate other protocols on top of
 it.
 
 ---
@@ -138,10 +154,15 @@ it.
 
 On top of the security layer, the second protocol that is negotiated is the multiplexing layer.
 
-Again, two protocols are standard: *mplex* and *yamux* (only implemented in Go).
+Three protocols exist:
+- *mplex*
+- *yamux* (only implemented in Go)
+- *spdy* (only implemented in JavaScript)
 
-Multiplexing allows both nodes to open substreams on the connection, each of which negotiate a
-separate protocol.
+<img src="multiplexing.svg" alt="" />
+
+Multiplexing allows both nodes to open multiple substreams on a single connection, where each of
+these substreams uses a different protocol and is treated as if it was separate connection.
 
 ---
 
@@ -163,15 +184,95 @@ Allows querying:
 
 ---
 
+# Interlude: Multihash
+
+The ID of a node is stored in the *multihash* format.
+
+---
+
+# Final protocols: floodsub
+
+Publish-subscribe protocol.
+
+The *floodsub* protocols allows you to broadcast messages over the network. A node can send a
+message to another node through this protocol, and the message will then be broadcasted to all the
+other nodes it is connected to.
+
+---
+
 # Final protocols: kademlia
 
 Allows peer discovery and record store.
 
 ---
 
-# Final protocols: floodsub
+# Final protocols: bitswap
 
+The protocol used by IPFS.
 
+---
+
+# Final protocols: *any protocol you want*
+
+Extensible.
+
+---
+
+# Designing a small chat application
+
+Let's write a small peer-to-peer application that allows all the members of the network to chat
+together.
+
+How it all plugs together:
+
+- When they start, nodes have absolutely no idea how to access other nodes. In order to be able to
+  function, we need to have a list of *bootstrap nodes*.
+- When a node starts, it generates a key pair for itself or loads an existing key pair from the
+  disk.
+- It then uses the Kademlia protocol in order to discover nodes whose IDs are near its own key
+  pair. This process involves connecting to some of the boostrap nodes, opening the Kademlia
+  protocol. TODO: meh
+- It will then connect to a certain number of closest nodes and open the *floodsub* protocol.
+- Any message received from any of these nodes through *floodsub* will be printed to stdout.
+  Anything received by stdin will be broadcasted as a message to all the network connected through
+  *floodsub*.
+
+---
+
+# Walkthrough #1: Initialization
+
+```rust
+let bootstrap_peer_id = PeerId::from_public_key(include_bytes!("../bootstrap-node-public-key.der"));
+
+let peer_store = Arc::new(libp2p_peerstore::memory_peerstore::MemoryPeerstore::empty());
+if !is_bootstrap {
+    peer_store
+        .peer_or_create(&bootstrap_peer_id)
+        .add_addr("/ip4/127.0.0.1/tcp/10101".parse().unwrap(),
+                Duration::from_secs(3600 * 24 * 365));
+}
+
+let my_peer_id = if is_bootstrap {
+    info!("Configured as a bootstrap node");
+    bootstrap_peer_id
+} else {
+    let key = (0..2048).map(|_| rand::random::<u8>()).collect::<Vec<_>>();
+    PeerId::from_public_key(&key)
+};
+```
+
+---
+
+# Walkthrough #2: Build the transport
+
+```rust
+let mut core = tokio_core::reactor::Core::new().unwrap();
+let transport = IdentifyTransport::new(WsConfig::new(libp2p_tcp_transport::TcpConfig::new(core.handle()))
+    .or_transport(libp2p_tcp_transport::TcpConfig::new(core.handle()))
+    .with_upgrade(libp2p_swarm::PlainTextConfig)
+    .with_upgrade(multiplex::MultiplexConfig)
+    .into_connection_reuse(), peer_store.clone());
+```
 
     </textarea>
      <script src="remark.min.js">
