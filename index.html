@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <style type="text/css">
+@import url('https://fonts.googleapis.com/css?family=Dosis');
+
+body {
+    color: white;
+    font-family: Verdana, Geneva, Tahoma, sans-serif;
+}
+
+.remark-slide-number {
+    visibility: hidden;
+}
+
+.remark-slide-content {
+    background-color: #282828;
+}
+
+.remark-slide-content h1 {
+    font-size: 1.7em;
+    margin-bottom: 0.5em;
+}
+
+.remark-slide-content h2 {
+    font-size: 1.4em;
+    margin-bottom: 0.2em;
+}
+
+.remark-slide-content table {
+    border-collapse: collapse;
+}
+
+.remark-slide-content table td, .remark-slide-content table th {
+    border: 1px solid black;
+    padding: 0.5em;
+}
+
+    </style>
+  </head>
+  <body>
+     <textarea id="source">
+class: center, middle
+
+# Libp2p - zkSummit
+
+## Power to the peers
+
+<div style="position: absolute; bottom: 5%; left: 0; right: 0;">
+    <div style="text-align: center">
+        <img src="parity-logo.png" alt="Parity" height="128" />
+    </div>
+</div>
+<div style="position: absolute; bottom: 5%; left: 5%;">
+.left[
+    <img src="twitter.png" alt="Twitter" height="16" /> twitter.com/tomaka17<br />
+    <img src="github.png" alt="GitHub" height="16" /> github.com/tomaka<br />
+]
+</div>
+<div style="position: absolute; bottom: 5%; right: 5%;">
+.right[
+    twitter.com/jFransham <img src="twitter.png" alt="Twitter" height="16" /><br />
+    github.com/Vurich <img src="github.png" alt="GitHub" height="16" /><br />
+]
+</div>
+---
+
+# What is libp2p?
+
+<div style="position: absolute; bottom: 5%; right: 5%;">
+.right[
+    <img src="p2p.svg" alt="" height="300" /><br />
+]
+</div>
+
+- Peer-to-peer networking protocol
+- Implementations in Go, JavaScript and Rust (us!)
+- Used by IPFS
+- Will be used by Polkadot and Parity
+- May be used by Ethereum in the future
+
+---
+
+# Multiaddress
+
+In traditional p2p systems, a node is contacted directly through an IP address, a TCP port and an
+UDP port.
+
+In libp2p, a node is contacted through a multiaddress.
+
+Examples:
+
+- `/ip4/80.129.4.75/tcp/8200`
+- `/ip4/196.27.207.12/tcp/10250/wss`
+- `/ip6/2001:db8:a0b:12f0::1/udp/3050`
+- `/dns/example.com/tcp/5000`
+- `/ip4/125.90.85.23/tcp/5000/p2p-circuit/ip4/90.2.98.122/tcp/9001`
+
+---
+
+    </textarea>
+     <script src="remark.min.js">
+    </script>
+    <script>
+       var slideshow = remark.create();
+    </script>
+  </body>
+</html>
+
+
