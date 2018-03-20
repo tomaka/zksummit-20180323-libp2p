@@ -170,27 +170,50 @@ these substreams uses a different protocol and is treated as if it was separate 
 
 In each multiplexed substream, a final protocol is negotiated.
 
-Examples: *identify*, *ping*, *kademlia*, *floodsub*, etc., or any custom protocol you wish.
+Example of some commonly-supported protocols:
+
+- *identify*
+- *ping*
+- *kademlia*
+- *floodsub*
+- etc.
+
+Or you can also create your own protocol, which is often necessary.
+
+Example:
+
+- IPFS uses the `bitswap` protocol.
+- Polkadot, Parity and Ethereum would also use their own custom protocol.
 
 ---
 
-# Final protocols: identify
+# Protocol detail: identify
 
-Allows querying:
+Whenever a dialer connects to a listener, the listener immediately sends back information about
+itself.
 
-- The public key of a node (useful if secio isn't used).
-- The multiaddresses a node is listening on.
+These information include:
+
+- The public key of the node (useful if secio isn't used).
+- The multiaddresses the node is listening on.
 - The protocols a node supports.
+- The version of the client the node uses.
+- The "global" protocol that the node wants (eg. "ipfs", "polkadot")
+
+**Note**: A common situation is that A dials B, then B opens a multiplexed substream to A and
+negotiates the *identify* protocol on it. It is then A that sends information about itself to B,
+allowing B to learn about A.
 
 ---
 
 # Interlude: Multihash
 
-The ID of a node is stored in the *multihash* format.
+The ID of a node is not tied to any specific algorithm and instead is provided in the *multihash*
+format.
 
 ---
 
-# Final protocols: floodsub
+# Protocol detail: floodsub
 
 Publish-subscribe protocol.
 
@@ -198,23 +221,21 @@ The *floodsub* protocols allows you to broadcast messages over the network. A no
 message to another node through this protocol, and the message will then be broadcasted to all the
 other nodes it is connected to.
 
+Each message has a topic. Nodes subscribe to specific topics and only receive messages that match
+the topic they are registered to.
+
+Example usages:
+
+- Messages in a chat application.
+- Broadcasting new blocks in a blockchain.
+
+Messages can be signed in order to prove the author.
+
 ---
 
-# Final protocols: kademlia
+# Protocol detail: kademlia
 
 Allows peer discovery and record store.
-
----
-
-# Final protocols: bitswap
-
-The protocol used by IPFS.
-
----
-
-# Final protocols: *any protocol you want*
-
-Extensible.
 
 ---
 
