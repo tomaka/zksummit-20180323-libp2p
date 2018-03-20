@@ -67,24 +67,33 @@ class: center, middle
 
 # What is libp2p?
 
-<div style="position: absolute; bottom: 5%; right: 5%;">
-.right[
-    <img src="p2p.svg" alt="" height="300" /><br />
-]
-</div>
-
 - Peer-to-peer networking protocol
 - Implementations in Go, JavaScript and Rust (us!)
 - Used by IPFS
 - Will be used by Polkadot and Parity
 - May be used by Ethereum in the future
 
+<div style="position: absolute; bottom: 5%; left: 5%;">
+.left[
+    <img src="ipfs.png" alt="IPFS" height="64" />
+]
+</div>
+<div style="position: absolute; bottom: 5%; left: 0; right: 0;">
+    <div style="text-align: center">
+        <img src="polkadot.png" alt="Polkadot" height="64" />
+    </div>
+</div>
+<div style="position: absolute; bottom: 5%; right: 5%;">
+.right[
+    <img src="parity-logo.png" alt="Parity" height="64" />
+]
+</div>
 ---
 
 # Multiaddress
 
-In traditional p2p systems, a node is contacted directly through an IP address, a TCP port and an
-UDP port.
+In traditional peer-to-peer systems, a node is contacted directly through an IP address, a TCP port
+and an UDP port.
 
 In libp2p, a node is contacted through a multiaddress.
 
@@ -98,6 +107,72 @@ Examples:
 
 ---
 
+# Protocol negotiation
+
+Once a connection between two nodes is established, the dialer negotiates with the listener a
+protocol to apply to the connection.
+
+Example communications between two nodes:
+
+<img src="multistream-select.png" alt="" />
+
+In this example, we negotiate the protocol `/plaintext/1.0.0`, then the protocol `/mplex/6.7.0`.
+
+---
+
+# Security layer
+
+The first protocol negotiated when a connection is open is either the security layer.
+
+Two are standard: *plaintext* and *secio*.
+Plaintext is just a basic pass-through protocol.
+
+Secio encrypts communications.
+
+After the security layer has been negotiated, the two nodes negotiated other protocols on top of
+it.
+
+---
+
+# Multiplexing
+
+On top of the security layer, the second protocol that is negotiated is the multiplexing layer.
+
+Again, two protocols are standard: *mplex* and *yamux* (only implemented in Go).
+
+Multiplexing allows both nodes to open substreams on the connection, each of which negotiate a
+separate protocol.
+
+---
+
+# Final protocols
+
+In each multiplexed substream, a final protocol is negotiated.
+
+Examples: *identify*, *ping*, *kademlia*, *floodsub*, etc., or any custom protocol you wish.
+
+---
+
+# Final protocols: identify
+
+Allows querying:
+
+- The public key of a node (useful if secio isn't used).
+- The multiaddresses a node is listening on.
+- The protocols a node supports.
+
+---
+
+# Final protocols: kademlia
+
+Allows peer discovery and record store.
+
+---
+
+# Final protocols: floodsub
+
+
+
     </textarea>
      <script src="remark.min.js">
     </script>
@@ -106,5 +181,3 @@ Examples:
     </script>
   </body>
 </html>
-
-
