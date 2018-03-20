@@ -92,18 +92,21 @@ class: center, middle
 
 # Multiaddress
 
-In traditional peer-to-peer systems, a node is contacted directly through an IP address, a TCP port
+In traditional peer-to-peer systems, a node is contacted through an IP address, a TCP port
 and an UDP port.
 
-In libp2p, a node is contacted through a multiaddress.
+In libp2p, a node is contacted through a *multiaddress*.
 
 Examples:
 
 - `/ip4/80.129.4.75/tcp/8200`
-- `/ip4/196.27.207.12/tcp/10250/wss`
+- `/ip4/196.27.207.12/tcp/10250/ws`
 - `/ip6/2001:db8:a0b:12f0::1/udp/3050`
 - `/dns/example.com/tcp/5000`
 - `/ip4/125.90.85.23/tcp/5000/p2p-circuit/ip4/90.2.98.122/tcp/9001`
+
+**Note**: Nodes can communicate with each other entirely through WebSockets, meaning that we can
+run a JavaScript or WASM node inside a browser.
 
 ---
 
@@ -120,33 +123,20 @@ In this example, we negotiate the protocol `/plaintext/1.0.0`, then the protocol
 
 ---
 
-# Protocol negotiation: extensible
-
-The protocol negotiation itself is conducted with the `multistream-select` protocol. The protocol
-negotiation starts by sending the protocol that will be perform the negotiation and its version,
-here `multistream/1.0.0`.
-
-Therefore the protocol negotiation itself is also fully extensible.
-
----
-
 # Encryption layer
 
 The first protocol negotiated when a connection is open is the security layer.
 
 Two protocols exist:
-- *plaintext*, a basic pass-through protocol.
+- *plaintext*, a basic pass-through protocol. Useful for debugging.
 - *secio*, that provides full encryption.
 
 ## Secio
 
+Standard Diffie-Hellman key exchange.
+
 The cipher, hash function, and key exchange algorithm are not hardcoded in the protocol, and are
 also negotiated between the two nodes during the *secio* handshake.
-
-## Afterwards
-
-After the security layer has been negotiated, the two nodes can negotiate other protocols on top of
-it.
 
 ---
 
@@ -159,7 +149,9 @@ Three protocols exist:
 - *yamux* (only implemented in Go)
 - *spdy* (only implemented in JavaScript)
 
-<img src="multiplexing.svg" alt="" />
+<div style="text-align:center">
+    <img src="multiplexing.svg" alt="" />
+</div>
 
 Multiplexing allows both nodes to open multiple substreams on a single connection, where each of
 these substreams uses a different protocol and is treated as if it was separate connection.
@@ -178,11 +170,11 @@ Example of some commonly-supported protocols:
 - *floodsub*
 - etc.
 
-Or you can also create your own protocol, which is often necessary.
+Or you can also create your own protocol, which is often what you want.
 
 Example:
 
-- IPFS uses the `bitswap` protocol.
+- IPFS uses the *bitswap* protocol.
 - Polkadot, Parity and Ethereum would also use their own custom protocol.
 
 ---
@@ -262,10 +254,15 @@ How it all plugs together:
 
 # Walkthrough #1: Initialization
 
-```rust
-let bootstrap_peer_id = PeerId::from_public_key(include_bytes!("../bootstrap-node-public-key.der"));
+Nodes have two modes: bootstrap, or not.
 
-let peer_store = Arc::new(libp2p_peerstore::memory_peerstore::MemoryPeerstore::empty());
+We create what is called a *peerstore*, and store the bootstrap node in it (unless we are the
+bootstrap node).
+
+```rust
+let bootstrap_peer_id = ...;        // some hardcoded value
+
+let peer_store = Arc::new(MemoryPeerstore::empty());
 if !is_bootstrap {
     peer_store
         .peer_or_create(&bootstrap_peer_id)
@@ -274,7 +271,6 @@ if !is_bootstrap {
 }
 
 let my_peer_id = if is_bootstrap {
-    info!("Configured as a bootstrap node");
     bootstrap_peer_id
 } else {
     let key = (0..2048).map(|_| rand::random::<u8>()).collect::<Vec<_>>();
