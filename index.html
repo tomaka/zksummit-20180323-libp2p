@@ -206,6 +206,10 @@ allowing B to learn about A.
 The ID of a node is not tied to any specific algorithm and instead is provided in the *multihash*
 format.
 
+A multihash is made of an algorithm code plus a digest.
+
+By not hard-coding a specific algorithm in the specs, this makes the protocol more future-proof.
+
 ---
 
 # Protocol detail: floodsub
@@ -323,7 +327,7 @@ let mut core = tokio_core::reactor::Core::new().unwrap();
 let raw = WsConfig::new(TcpConfig::new(core.handle()))
     .or_transport(TcpConfig::new(core.handle()))
     .with_upgrade(PlainTextConfig)
-    .with_upgrade(MplexConfig)
+    .with_upgrade(BufferedMplexConfig::<[_; 256]>::new())
     .into_connection_reuse());
 let transport = IdentifyTransport::new(raw, peer_store.clone());
 ```
