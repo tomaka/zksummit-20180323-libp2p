@@ -272,7 +272,10 @@ Let's build this chat application with rust-libp2p.
 
 https://github.com/libp2p/rust-libp2p
 
-**Warning**: the code below doesn't exactly match the current API.
+**Warning**: the code below doesn't exactly match the current API because the library is still
+being adjusted.
+
+Demo code can be found here: TODO
 
 ---
 
@@ -425,10 +428,130 @@ floodsub_ctl.subscribe(&topic);
 
 # Walkthrough #7: perform a Kademlia node find
 
+We use the `swarm_controller` to perform a Kademlia node find, and connect to all the nodes that
+are closest to ours.
+
 ```rust
-let (kad_controller, kad_init) = kad_ctl_proto.start(swarm_controller.clone());
+let (kad_controller, kad_init) =
+    kad_ctl_proto.start(swarm_controller.clone());
+let finished_enum = kad_controller
+    .find_node(my_peer_id.clone())
+    .and_then(move |out| {
+        let local_hash = U512::from(my_peer_id.hash());
+        for n in out {
+            let addr = AddrComponent::P2P(n.into_bytes()).into();
+            let _ = swarm_controller.dial_to_handler(addr,
+                                        floodsub_upgrade.clone());
+        }
+        Ok(())
+    });
 ```
 
+---
+
+# Walkthrough #8: sending and receiving messages
+
+Whenever a message arrives on stdin, we dispatch it:
+
+```rust
+let stdin = spawn_stdin_stream_unbounded()
+    .for_each(move |msg| {
+        ... // The actual code is long because we need to
+            // handle line breaks
+        floodsub_ctl.publish(&topic, msg.into_bytes());
+        Ok(())
+    });
+```
+
+Whenever a message is received through floodsub, we write it to stdout:
+
+```rust
+let floodsub_rx = floodsub_rx.for_each(|msg| {
+    if let Ok(msg) = String::from_utf8(msg.data) {
+        info!("< {}", msg);
+    }
+    Ok(())
+});
+```
+
+---
+
+# Walkthrough 9: group everything and run
+
+Rust-libp2p is fully asynchronous. Everything we did so far only performs initializations,
+and doesn't actually do anything. We now start everything.
+
+This is done by grouping everything into one `final_future`, and running it:
+
+```rust
+let final_future = swarm_future
+    .select(floodsub_rx)
+        .map_err(|(err, _)| err).map(|((), _)| ())
+    .select(stdin)
+        .map_err(|(err, _)| err).map(|((), _)| ())
+    .select(finished_enum)
+        .map_err(|(err, _)| err).and_then(|((), n)| n)
+    .select(kad_init)
+        .map_err(|(err, _)| err).and_then(|((), n)| n);
+
+core.run(final_future).unwrap();
+```
+
+**Note**: This code is very tokio-heavy and thus can be confusing if you're not familiar with
+this library.
+
+---
+
+# Misc: running the same code in the browser
+
+The same code can be compiled for asmjs or wasm and run in the browser.
+
+A few adjustements are required:
+
+- Building the `transport`, as we cannot use TCP/IP.
+- Running the final future is more complicated because of the cooperating threading model used
+  by JavaScript (see http://bit.ly/2FZU3wQ).
+
+Other than that, it's just:
+
+```sh
+cargo b --target=asmjs-unknown-emscripten
+```
+
+Or:
+
+```sh
+cargo b --target=wasm32-unknown-emscripten
+```
+
+---
+class: center, middle
+
+# Demo time?
+
+Demo code can be found here: TODO
+
+---
+class: center, middle
+
+# Thank you!
+
+<div style="position: absolute; bottom: 5%; left: 0; right: 0;">
+    <div style="text-align: center">
+        <img src="parity-logo.png" alt="Parity" height="128" />
+    </div>
+</div>
+<div style="position: absolute; bottom: 5%; left: 5%;">
+.left[
+    <img src="twitter.png" alt="Twitter" height="16" /> twitter.com/tomaka17<br />
+    <img src="github.png" alt="GitHub" height="16" /> github.com/tomaka<br />
+]
+</div>
+<div style="position: absolute; bottom: 5%; right: 5%;">
+.right[
+    github.com/Vurich <img src="github.png" alt="GitHub" height="16" /><br />
+]
+</div>
     </textarea>
      <script src="remark.min.js">
     </script>
