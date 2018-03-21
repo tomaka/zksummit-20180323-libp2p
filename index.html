@@ -9,6 +9,10 @@ body {
     font-family: Verdana, Geneva, Tahoma, sans-serif;
 }
 
+a, a:hover, a:visited, a:active {
+    color: lightblue;
+}
+
 .remark-slide-number {
     visibility: hidden;
 }
@@ -59,7 +63,6 @@ class: center, middle
 </div>
 <div style="position: absolute; bottom: 5%; right: 5%;">
 .right[
-    twitter.com/jFransham <img src="twitter.png" alt="Twitter" height="16" /><br />
     github.com/Vurich <img src="github.png" alt="GitHub" height="16" /><br />
 ]
 </div>
@@ -209,7 +212,7 @@ format.
 
 Publish-subscribe protocol.
 
-The *floodsub* protocols allows you to broadcast messages over the network. A node can send a
+The *floodsub* protocol allows you to broadcast messages over the network. A node can send a
 message to another node through this protocol, and the message will then be broadcasted to all the
 other nodes it is connected to.
 
@@ -227,7 +230,17 @@ Messages can be signed in order to prove the author.
 
 # Protocol detail: kademlia
 
-Allows peer discovery and record store.
+Kademlia is a Distributed Hash Table (DHT).
+
+A DHT is similar to a traditional hash table, except that each node only stores a subset of the
+entries. The entries that a node stores are determined based on its public key.
+
+Each node that supports kademlia manages two DHTs: one for information about peers, and one for
+arbitrary records that any node of the network can insert. These arbitrary records expire after a
+while.
+
+When a node joins the network, it notifies the nodes it connects to in order to get inserted in
+the peers' hash table.
 
 ---
 
@@ -251,13 +264,24 @@ How it all plugs together:
   *floodsub*.
 
 ---
+class: center, middle
+
+# Walkthrough with rust-libp2p
+
+Let's build this chat application with rust-libp2p.
+
+https://github.com/libp2p/rust-libp2p
+
+**Warning**: the code below doesn't exactly match the current API.
+
+---
 
 # Walkthrough #1: Initialization
 
 Nodes have two modes: bootstrap, or not.
 
 We create what is called a *peerstore*, and store the bootstrap node in it (unless we are the
-bootstrap node).
+bootstrap node). The *peerstore* is a database of node information.
 
 ```rust
 let bootstrap_peer_id = ...;        // some hardcoded value
@@ -273,7 +297,8 @@ if !is_bootstrap {
 let my_peer_id = if is_bootstrap {
     bootstrap_peer_id
 } else {
-    let key = (0..2048).map(|_| rand::random::<u8>()).collect::<Vec<_>>();
+    let key = (0..2048).map(|_| rand::random::<u8>())
+                       .collect::<Vec<_>>();
     PeerId::from_public_key(&key)
 };
 ```
@@ -282,13 +307,126 @@ let my_peer_id = if is_bootstrap {
 
 # Walkthrough #2: Build the transport
 
+We build the object the represents how we are able to access other nodes.
+
+The code below builds a *transport* that allows WebSockets over TCP/IP, or regular TCP/IP, and
+with on top of it *plaintext* and *mplex*.
+
+We put an *IdentifyTransport* around the transport, so that nodes that connections to nodes are
+automatically identified and the node IDs determined and stored in the `peer_store`.
+
 ```rust
 let mut core = tokio_core::reactor::Core::new().unwrap();
-let transport = IdentifyTransport::new(WsConfig::new(libp2p_tcp_transport::TcpConfig::new(core.handle()))
-    .or_transport(libp2p_tcp_transport::TcpConfig::new(core.handle()))
-    .with_upgrade(libp2p_swarm::PlainTextConfig)
-    .with_upgrade(multiplex::MultiplexConfig)
-    .into_connection_reuse(), peer_store.clone());
+let raw = WsConfig::new(TcpConfig::new(core.handle()))
+    .or_transport(TcpConfig::new(core.handle()))
+    .with_upgrade(PlainTextConfig)
+    .with_upgrade(MplexConfig)
+    .into_connection_reuse());
+let transport = IdentifyTransport::new(raw, peer_store.clone());
+```
+
+---
+
+# Walkthrough #3: prepare the final protocols configuration
+
+We prepare the configuration for the final protocols that the server will handle: *identify*,
+*kademlia* and *floodsub*.
+
+```rust
+// Floodsub
+let (floodsub, fs_rx) = FloodSubUpgrade::new(my_peer_id.clone());
+
+// Kademlia
+let kad_cfg = KademliaConfig {
+    parallelism: 3,
+    peer_store: peer_store,
+    local_peer_id: my_peer_id.clone(),
+    timeout: Duration::from_secs(2),
+};
+let kad_ctl_proto = KademliaControllerPrototype::new(kad_cfg);
+let kad_upgrade = KademliaUpgrade::from_prototype(&kad_ctl_proto);
+
+// Final
+let protocols_configuration = ConnectionUpgrader {
+    kad: kad_upgrade,
+    identify: libp2p_identify::IdentifyProtocolConfig,
+    floodsub: floodsub.clone(),
+};
+```
+
+---
+
+# Walkthrough #4: build the swarm
+
+We now create what is called a *swarm*. This is the object that will manage all the active
+connections.
+
+```rust
+let (swarm_controller, swarm_future) = libp2p_swarm::swarm(
+    transport, protocols_configuration, |upgrade, client_addr| {
+        match upgrade {
+            Protocol::Kad(kad) => Box::new(kad) as Box<_>,
+            Protocol::FloodSub(future) => {
+                Box::new(future) as Box<_>
+            },
+            Protocol::Identify(id) => {
+                match id {
+                    IdentifyOutput::Sender { sender, .. }) => {
+                        sender.send(build_local_identify_info(),
+                                    &client_addr)
+                    },
+                    IdentifyOutput::RemoteInfo { .. } => {
+                        unreachable!()
+                    },
+                }
+            }
+        }
+    },
+);
+```
+
+---
+
+# Walkthrough #5: start listening
+
+We ask the `swarm_controller` to start listening for incoming connections.
+
+```rust
+let addr: Multiaddr = if is_bootstrap {
+    "/ip4/0.0.0.0/tcp/10101".parse().unwrap()
+} else {
+    "/ip4/0.0.0.0/tcp/0".parse().unwrap()
+};
+
+let actual_addr = swarm_controller.listen_on(addr.clone())
+    .expect("failed to listen to multiaddress");
+info!("Now listening on {}", actual_addr);
+```
+
+---
+
+# Walkthrough #6: subscribe to a floodsub topic
+
+Having a `swarm_controller` makes it possible to perform actions on the network.
+
+Let's subscribe to a *floodsub* topic. This will tell everyone we are connected to (ie. nobody for
+now) and will connect to, that we want to receive messages for this topic.
+
+```rust
+let topic = TopicBuilder::new("chat").build();
+let floodsub_ctl = {
+    FloodSubController::new(&floodsub_upgrade,
+                            swarm_controller.clone())
+};
+floodsub_ctl.subscribe(&topic);
+```
+
+---
+
+# Walkthrough #7: perform a Kademlia node find
+
+```rust
+let (kad_controller, kad_init) = kad_ctl_proto.start(swarm_controller.clone());
 ```
 
     </textarea>
