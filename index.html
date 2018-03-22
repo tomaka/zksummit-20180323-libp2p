@@ -93,36 +93,75 @@ class: center, middle
 </div>
 ---
 
+# Why libp2p?
+
+- Most existing peer-to-peer networking solutions enforce use of direct
+  connections over TCP-IP
+- Supporting additional transports requires a huge overhaul of the protocol and
+  significant development work
+- libp2p attempts to fix this by being pluggable from the very start
+
+???
+
+- (after second point): this means that, for example, a node running in a
+  browser cannot connect to a node running in the cloud, or that proxying
+  support must be baked into the protocol itself
+
+---
+
 # Multiaddress
 
-In traditional peer-to-peer systems, a node is contacted through an IP address, a TCP port
-and an UDP port.
+In traditional peer-to-peer systems, a node is contacted through an IP address,
+a TCP port and an UDP port.
 
-In libp2p, a node is contacted through a *multiaddress*.
+In libp2p, a node is contacted through a *multiaddress*. This specifies which
+transports and which protocols to use.
 
 Examples:
 
 - `/ip4/80.129.4.75/tcp/8200`
-- `/ip4/196.27.207.12/tcp/10250/ws`
-- `/ip6/2001:db8:a0b:12f0::1/udp/3050`
+- `/ip4/80.129.4.75/tcp/8200/ws`
+- `/ip6/2001:db8:a0b:12f0::1/tcp/3050`
+- `/onion/timaq4ygg2iegci7:80/http`
 - `/dns/example.com/tcp/5000`
 - `/ip4/125.90.85.23/tcp/5000/p2p-circuit/ip4/90.2.98.122/tcp/9001`
 
-**Note**: Nodes can communicate with each other entirely through WebSockets, meaning that we can
-run a JavaScript or WASM node inside a browser.
+libp2p nodes can communicate with each other through TCP/IP, WebSockets, unix
+pipes, and much more.
+
+???
+
+- `/ip4/80.129.4.75/tcp/8200` (TCP/IPv4)
+- `/ip4/80.129.4.75/tcp/8200/ws` (websockets)
+- `/ip6/2001:db8:a0b:12f0::1/tcp/3050` (TCP/IPv6)
+- `/onion/timaq4ygg2iegci7:80/http` (Onion routing/Tor network)
+- `/dns/example.com/tcp/5000` (DNS)
+- `/ip4/125.90.85.23/tcp/5000/p2p-circuit/ip4/90.2.98.122/tcp/9001` (TCP/IPv4
+  with a proxy that is contacted using TCP/IPv4)
+
+- Websockets means that we can run a JavaScript or WASM libp2p node inside a
+  browser
+- Restriction: must be able to transport a continuous stream of bytes (only to
+  make writing protocol implementations for libp2p easier, and could be lifted
+  in the future)
+- Restriction rules out UDP without some layer over the top that adds in-order
+  reliable messaging to UDP like UDT.
 
 ---
 
 # Protocol negotiation
 
-Once a connection between two nodes is established, the dialer negotiates with the listener a
-protocol to apply to the connection.
+Once a connection between two nodes is established, the dialer negotiates with
+the listener a protocol to apply to the connection.
 
 Example communications between two nodes:
 
 <img src="multistream-select.png" alt="" />
 
-In this example, we negotiate the protocol `/plaintext/1.0.0`, then the protocol `/mplex/6.7.0`.
+???
+
+In this example, we negotiate the protocol `/plaintext/1.0.0`, then the protocol
+`/mplex/6.7.0`.
 
 ---
 
@@ -130,47 +169,67 @@ In this example, we negotiate the protocol `/plaintext/1.0.0`, then the protocol
 
 The first protocol negotiated when a connection is open is the security layer.
 
-Two protocols exist:
+Right now, two protocols exist:
+- *plaintext*
+- *secio*
+
+We probably don't need more any time soon, *secio* is very flexible.
+
+???
+
 - *plaintext*, a basic pass-through protocol. Useful for debugging.
-- *secio*, that provides full encryption.
-
-## Secio
-
-Standard Diffie-Hellman key exchange.
-
-The cipher, hash function, and key exchange algorithm are not hardcoded in the protocol, and are
-also negotiated between the two nodes during the *secio* handshake.
+- *secio*, that provides full end-to-end encryption.
+- This is roughly analogous to HTTP vs HTTPS - the data transferred is the same,
+  but in one the data is encrypted.
+- In *secio*, the cipher, hash function, and key exchange algorithm are not
+  hardcoded in the protocol, and are also negotiated between the two nodes
+  during the *secio* handshake. This means we can incrementally upgrade nodes if
+  the existing hash function is found to be lacking.
 
 ---
 
 # Multiplexing
 
-On top of the security layer, the second protocol that is negotiated is the multiplexing layer.
+On top of the security layer, the second protocol that is negotiated is the
+multiplexing layer.
 
 Three protocols exist:
+- *yamux*
+- *spdy*
 - *mplex*
-- *yamux* (only implemented in Go)
-- *spdy* (only implemented in JavaScript)
 
 <div style="text-align:center">
     <img src="multiplexing.svg" alt="" />
 </div>
 
-Multiplexing allows both nodes to open multiple substreams on a single connection, where each of
-these substreams uses a different protocol and is treated as if it was separate connection.
+???
+
+- *yamux*, only implemented in Go
+- *spdy*, only implemented in JavaScript (actually implemented in a few
+  languages but only JS has it available as a libp2p multiplexing solution)
+  - Google's multiplexing solution that is the basis for how HTTP/2 implements
+    multiplexing
+- *mplex*, implemented in Go, JavaScript and now Rust
+  - Originally written as an ad-hoc spec in JavaScript but is now de-facto
+    standardised due to its reimplementation in JS and Rust.
+
+Multiplexing allows both nodes to open multiple substreams on a single
+connection, where each of these substreams uses a different protocol and is
+treated as if it was separate connection. The extra overhead for these
+substreams is minimal.
 
 ---
 
-# Final protocols
+# Top-level protocols
 
-In each multiplexed substream, a final protocol is negotiated.
+In each multiplexed substream, a top-level protocol is negotiated.
 
-Example of some commonly-supported protocols:
+Example of some protocols:
 
-- *identify*
 - *ping*
-- *kademlia*
+- *identify*
 - *floodsub*
+- *kademlia*
 - etc.
 
 Or you can also create your own protocol, which is often what you want.
@@ -178,57 +237,69 @@ Or you can also create your own protocol, which is often what you want.
 Example:
 
 - IPFS uses the *bitswap* protocol.
-- Polkadot, Parity and Ethereum would also use their own custom protocol.
+- Polkadot and Ethereum would also use their own custom protocol.
+
+???
+
+- *ping* - exactly what it says on the tin
+- *identify* - a protocol allowing nodes to express a unique identity
+- *floodsub* - multiple-producer, multiple-consumer decentralised message bus
+- *kademlia* - decentralised peer discovery and record storage
+- etc.
+
+- IPFS uses the *bitswap* protocol (most of IPFS just leverages libp2p instead
+  of requiring a custom implementation, this protocol just adds the concept of
+  files on top).
+- Mention that Parity intends to implement libp2p as a secondary communication
+  mechanism to their existing TCP-only solution.
 
 ---
 
-# Protocol detail: identify
+# Protocol detail: *identify*
 
-Whenever a dialer connects to a listener, the listener immediately sends back information about
-itself.
+Whenever a dialer connects to a listener, a listener responding to the
+*identify* protocol responds with information about itself.
 
 These information include:
 
 - The public key of the node (useful if secio isn't used).
 - The multiaddresses the node is listening on.
-- The protocols a node supports.
-- The version of the client the node uses.
-- The "global" protocol that the node wants (eg. "ipfs", "polkadot")
+- The protocols the node supports.
+- The version of libp2p the node implements.
+- The top-level protocol that the node wants (eg. "ipfs", "polkadot")
 
-**Note**: A common situation is that A dials B, then B opens a multiplexed substream to A and
-negotiates the *identify* protocol on it. It is then A that sends information about itself to B,
-allowing B to learn about A.
+???
 
----
-
-# Interlude: Multihash
-
-The ID of a node is not tied to any specific algorithm and instead is provided in the *multihash*
-format.
-
-A multihash is made of an algorithm code plus a digest.
-
-By not hard-coding a specific algorithm in the specs, this makes the protocol more future-proof.
+**Note**: A common situation is that A dials B, then B opens a multiplexed
+  substream to A and negotiates the *identify* protocol on it. It is then A that
+  sends information about itself to B, allowing B to learn about A.
 
 ---
 
-# Protocol detail: floodsub
+# Protocol detail: *floodsub*
 
 Publish-subscribe protocol.
 
-The *floodsub* protocol allows you to broadcast messages over the network. A node can send a
-message to another node through this protocol, and the message will then be broadcasted to all the
-other nodes it is connected to.
+The *floodsub* protocol allows you to broadcast messages over the network.
 
-Each message has a topic. Nodes subscribe to specific topics and only receive messages that match
-the topic they are registered to.
+Each message has a topic. Nodes subscribe to specific topics and will discard
+messages that do not match any of the topics they are registered to.
 
 Example usages:
 
 - Messages in a chat application.
 - Broadcasting new blocks in a blockchain.
+- Moves in a turn-based strategy game.
 
 Messages can be signed in order to prove the author.
+
+???
+
+What this means is that a node will send a message to all the nodes it knows
+about, and then these nodes will send the message to all the nodes _they_ care
+about, and so forth.
+
+Signing is currently unimplemented in the Rust implementation of *floodsub*
 
 ---
 
@@ -236,36 +307,83 @@ Messages can be signed in order to prove the author.
 
 Kademlia is a Distributed Hash Table (DHT).
 
-A DHT is similar to a traditional hash table, except that each node only stores a subset of the
-entries. The entries that a node stores are determined based on its public key.
+A DHT is similar to a traditional hash table, with each node acting like a
+bucket, except the nodes can share elements whereas entries tend to belong to
+precisely one hash table bucket.
 
-Each node that supports kademlia manages two DHTs: one for information about peers, and one for
-arbitrary records that any node of the network can insert. These arbitrary records expire after a
-while.
+Each node that supports kademlia manages two DHTs: one for peers, and one for
+data.
 
-When a node joins the network, it notifies the nodes it connects to in order to get inserted in
-the peers' hash table.
+When a node joins the network, it notifies the nodes it connects to in order to
+get inserted in the peers' hash table. If we choose a list of "bootstrap" nodes
+that are known about before connecting to the network, we can use these to
+incrementally discover every node on the network.
+
+???
+
+The entries that a node stores are determined based on
+its public key. This ensures a relatively-good distribution of entries without
+central coordination.
+
+The data records are totally arbitrary and can have basically any key and any
+value. Similarly to a K/V store like Redis, records in both the peer and data
+stores expire after some amount of time.
+
+These bootstrap nodes do not need to be special, or owned by the libp2p
+developers. They simply need to be nodes that are already connected to the
+network and whose addresses are already known.
+
+---
+
+# Why Rust?
+
+- Efficient but readable.
+- Control over resources and resource use.
+- Can write bindings into Rust from other languages.
+- Strict types and strict ownership system.
+
+???
+
+- Allows us to write code that is as readable and maintainable as code in
+  any modern language but is as efficient as a hand-rolled C implementation.
+- We can get fine-grained control over resource use. This is useful, as a
+  peer-to-peer system is more vulnerable to resource exhaustion attacks than
+  in a client-server model.
+- Rust can easily be called into from other languages in a way that is
+  impossible or impractical in languages like Go and JavaScript.
+- Rust's strict type system and ownership model means that we can get a better
+  understanding of the structure of libp2p itself, making it easier to port to
+  other languages like Haskell which may be stricter than Go and JavaScript.
 
 ---
 
 # Designing a small chat application
 
-Let's write a small peer-to-peer application that allows all the members of the network to chat
-together.
+Let's write a small peer-to-peer application that allows all the members of the
+network to chat together.
 
 How it all plugs together:
 
-- When they start, nodes have absolutely no idea how to access other nodes. In order to be able to
-  function, we need to have a list of *bootstrap nodes*.
-- When a node starts, it generates a key pair for itself or loads an existing key pair from the
-  disk.
-- It then uses the Kademlia protocol in order to discover nodes whose IDs are near its own key
-  pair. This process involves connecting to some of the boostrap nodes, opening the Kademlia
-  protocol. TODO: meh
-- It will then connect to a certain number of closest nodes and open the *floodsub* protocol.
-- Any message received from any of these nodes through *floodsub* will be printed to stdout.
-  Anything received by stdin will be broadcasted as a message to all the network connected through
-  *floodsub*.
+- Start peer discovery from bootstrap nodes.
+- Generate or load a keypair at startup.
+- Discover new peers using *kademlia*.
+- Open *floodsub* connections to closest nodes.
+- Write received messages to stdout and send messages from stdin to the network.
+
+???
+
+- When they start, nodes have absolutely no idea how to access other nodes. In
+  order to be able to function, we need to have a list of *bootstrap nodes*.
+- When a node starts, it generates a key pair for itself or loads an existing
+  key pair from the disk.
+- It then uses the Kademlia protocol in order to discover nodes whose IDs are
+  near its own key pair. This process involves connecting to some of the
+  boostrap nodes, opening the Kademlia protocol.
+- It will then connect to a certain number of closest nodes and open the
+  *floodsub* protocol.
+- Any message received from any of these nodes through *floodsub* will be
+  printed to stdout. Anything received by stdin will be broadcasted as a message
+  to all the network connected through *floodsub*.
 
 ---
 class: center, middle
@@ -276,8 +394,8 @@ Let's build this chat application with rust-libp2p.
 
 https://github.com/libp2p/rust-libp2p
 
-**Warning**: the code below doesn't exactly match the current API because the library is still
-being adjusted.
+**Warning**: the code below doesn't exactly match the current API because the
+library is still in development.
 
 Demo code can be found here: TODO
 
@@ -285,16 +403,14 @@ Demo code can be found here: TODO
 
 # Walkthrough #1: Initialization
 
-Nodes have two modes: bootstrap, or not.
-
-We create what is called a *peerstore*, and store the bootstrap node in it (unless we are the
-bootstrap node). The *peerstore* is a database of node information.
-
 ```rust
-let bootstrap_peer_id = ...;        // some hardcoded value
+let bootstrap_peer_id = BOOTSTRAP_ID;
 
+// This creates a peerstore in-process
 let peer_store = Arc::new(MemoryPeerstore::empty());
+
 if !is_bootstrap {
+// Add bootstrap node to peer store
     peer_store
         .peer_or_create(&bootstrap_peer_id)
         .add_addr("/ip4/127.0.0.1/tcp/10101".parse().unwrap(),
@@ -302,48 +418,99 @@ if !is_bootstrap {
 }
 
 let my_peer_id = if is_bootstrap {
+    // Hardcoded peer ID
     bootstrap_peer_id
 } else {
+    // Otherwise, we generate a key
     let key = (0..2048).map(|_| rand::random::<u8>())
                        .collect::<Vec<_>>();
     PeerId::from_public_key(&key)
 };
 ```
 
+???
+
+Nodes have two modes: bootstrap, or not.
+
+The `is_bootstrap` flag would probably be passed on the command line.
+
+We create what is called a *peerstore*, and store the bootstrap node in it
+(unless we are the bootstrap node). The *peerstore* is a database of node
+information.
+
+For the bootstrap node's ID we'd just use some hardcoded value. The only thing
+that matters is that it's unique and that all nodes agree on its value.
+
+We use an in-process peerstore (i.e. it's not stored on disk and will be
+destroyed when the process quits)
+
+This adds the bootstrap node's ID to the peer store with a hardcoded IP address.
+We only have a single bootstrap node for this demo but in a real application
+you'd have many, so that if one or more bootstrap nodes go down then you can
+still connect to the network.
+
+If we're the bootstrap node then our peer ID is a hardcoded value (since we only
+have one bootstrap node then this is simple)
+
+We generate a key using `/dev/urandom`.
+
 ---
 
 # Walkthrough #2: Build the transport
 
-We build the object the represents how we are able to access other nodes.
+This is the core of the configuration of libp2p.
 
-The code below builds a *transport* that allows WebSockets over TCP/IP, or regular TCP/IP, and
-with on top of it *plaintext* and *mplex*.
+We configure low-level transports, add dummy encryption, and configure
+*identify* on top.
 
-We put an *IdentifyTransport* around the transport, so that nodes that connections to nodes are
-automatically identified and the node IDs determined and stored in the `peer_store`.
+The Rust code to do this looks like this:
 
 ```rust
 let mut core = tokio_core::reactor::Core::new().unwrap();
-let raw = WsConfig::new(TcpConfig::new(core.handle()))
-    .or_transport(TcpConfig::new(core.handle()))
-    .with_upgrade(PlainTextConfig)
-    .with_upgrade(BufferedMplexConfig::<[_; 256]>::new())
-    .into_connection_reuse());
-let transport = IdentifyTransport::new(raw, peer_store.clone());
+
+let without_identify =
+    // `Ws` first, `Tcp` if that fails.
+    WsConfig::new(TcpConfig::new(core.handle()))
+        .or_transport(TcpConfig::new(core.handle()))
+        // Plain-text "encryption".
+        .with_upgrade(PlainTextConfig)
+        // Multiplexing
+        .with_upgrade(BufferedMplexConfig::<[_; 256]>::new())
+        .into_connection_reuse();
+
+let transport = IdentifyTransport::new(
+    without_identify,
+    peer_store.clone(),
+);
 ```
+
+???
+
+`core` allows us to run libp2p asynchronously.
+
+This is the core of the configuration of libp2p. Essentially, it defines the
+configuration of protocols that libp2p supports. We want to be able to use the
+regular internet (TCP/IP) _or_ websockets-over-TCP/IP to transfer our data, and
+we want to allow multiplexing (so for each stream provided by either TCP/IP or
+websockets, we can send many streams of data). We don't care about encrypting
+our messages so we use the *plaintext* dummy encryption protocol.
+
+Lastly, we add *identify* on top. This means that nodes are automatically
+identified when we connect to them and their node IDs determined and stored in
+the `peer_store`.
 
 ---
 
-# Walkthrough #3: prepare the final protocols configuration
+# Walkthrough #3: configure top-level protocols
 
-We prepare the configuration for the final protocols that the server will handle: *identify*,
-*kademlia* and *floodsub*.
+We prepare the configuration for the top-level protocols that the server will
+handle: *identify*, *kademlia* and *floodsub*.
 
 ```rust
-// Floodsub
+// We create the configuration for *floodsub*
 let (floodsub, fs_rx) = FloodSubUpgrade::new(my_peer_id.clone());
 
-// Kademlia
+// Configure *kademlia*
 let kad_cfg = KademliaConfig {
     parallelism: 3,
     peer_store: peer_store,
@@ -353,7 +520,7 @@ let kad_cfg = KademliaConfig {
 let kad_ctl_proto = KademliaControllerPrototype::new(kad_cfg);
 let kad_upgrade = KademliaUpgrade::from_prototype(&kad_ctl_proto);
 
-// Final
+// Combine the three protocols
 let protocols_configuration = ConnectionUpgrader {
     kad: kad_upgrade,
     identify: libp2p_identify::IdentifyProtocolConfig,
@@ -361,21 +528,29 @@ let protocols_configuration = ConnectionUpgrader {
 };
 ```
 
+???
+
+We create the configuration for *kademlia* (plus the controller that allows us
+to send commands and receive data from the network).
+
+Finally, we create an instance of a custom struct that allows us to implement
+all three top-level protocols simultaneously.
+
 ---
 
 # Walkthrough #4: build the swarm
-
-We now create what is called a *swarm*. This is the object that will manage all the active
-connections.
 
 ```rust
 let (swarm_controller, swarm_future) = libp2p_swarm::swarm(
     transport, protocols_configuration, |upgrade, client_addr| {
         match upgrade {
+            // *kademlia*
             Protocol::Kad(kad) => Box::new(kad) as Box<_>,
+            // *floodsub*
             Protocol::FloodSub(future) => {
                 Box::new(future) as Box<_>
             },
+            // *identify*
             Protocol::Identify(id) => {
                 match id {
                     IdentifyOutput::Sender { sender, .. }) => {
@@ -392,6 +567,18 @@ let (swarm_controller, swarm_future) = libp2p_swarm::swarm(
 );
 ```
 
+???
+
+We now create what is called a *swarm*. This is the object that will manage all
+the active connections. It's the central engine by which everything in libp2p is
+driven.
+
+Our custom struct produces an enum. If you don't know Rust, all you need to know
+is that we can handle values from each of *kademlia*, *floodsub* and *identify*
+seperately. If we only used one top-level protocol then we would only receive
+the values from that protocol, our custom struct simply gathers up all the
+values from all the protocols and turns it into a single value.
+
 ---
 
 # Walkthrough #5: start listening
@@ -400,8 +587,10 @@ We ask the `swarm_controller` to start listening for incoming connections.
 
 ```rust
 let addr: Multiaddr = if is_bootstrap {
+    // Hardcoded port
     "/ip4/0.0.0.0/tcp/10101".parse().unwrap()
 } else {
+    // Let OS choose port
     "/ip4/0.0.0.0/tcp/0".parse().unwrap()
 };
 
@@ -410,46 +599,81 @@ let actual_addr = swarm_controller.listen_on(addr.clone())
 info!("Now listening on {}", actual_addr);
 ```
 
+???
+
+If we're the bootstrap node, we start listening on a hardcoded port so that
+other nodes can find us. For now we only listen on TCP/IP but we could listen on
+multiple protocols if we wanted to.
+
+We pass this address into the swarm controller, which then returns the "real"
+address. This replaces the IP address with our real IP address and the port with
+our real port.
+
 ---
 
 # Walkthrough #6: subscribe to a floodsub topic
 
-Having a `swarm_controller` makes it possible to perform actions on the network.
-
-Let's subscribe to a *floodsub* topic. This will tell everyone we are connected to (ie. nobody for
-now) and will connect to, that we want to receive messages for this topic.
+Having a swarm controller makes it possible to perform actions on the network by
+sending commands to the top-level protocols. 
 
 ```rust
 let topic = TopicBuilder::new("chat").build();
-let floodsub_ctl = {
-    FloodSubController::new(&floodsub_upgrade,
-                            swarm_controller.clone())
-};
+
+// Create controller for *floodsub*
+let floodsub_ctl = FloodSubController::new(
+    &floodsub_upgrade,
+    swarm_controller.clone(),
+);
+
 floodsub_ctl.subscribe(&topic);
 ```
+
+???
+
+Here, we create a controller that sends messages to *floodsub* and use it to ask
+*floodsub* to subscribe to a topic. This will tell everyone we are connected to
+and will connect to that we want to receive messages for this topic. For now
+we're not connected to anyone, but when we do we'll communicate our topics to
+them.
 
 ---
 
 # Walkthrough #7: perform a Kademlia node find
 
-We use the `swarm_controller` to perform a Kademlia node find, and connect to all the nodes that
-are closest to ours.
-
 ```rust
+// Create controller for *kademlia*
 let (kad_controller, kad_init) =
     kad_ctl_proto.start(swarm_controller.clone());
+
 let finished_enum = kad_controller
+    // Ask for closest nodes
     .find_node(my_peer_id.clone())
     .and_then(move |out| {
         let local_hash = U512::from(my_peer_id.hash());
+
+        // Dial to the nodes
         for n in out {
             let addr = AddrComponent::P2P(n.into_bytes()).into();
-            let _ = swarm_controller.dial_to_handler(addr,
-                                        floodsub_upgrade.clone());
+
+            // Ignore errors
+            let _ = swarm_controller.dial_to_handler(
+                addr,
+                floodsub_upgrade.clone(),
+            );
         }
+
         Ok(())
     });
 ```
+
+???
+
+We use the `swarm_controller` to perform a Kademlia node find, and connect to
+all the nodes that are closest to ours.
+
+We ask *kademlia* for the nodes closest to us. Then we take these nodes and dial
+each of them in turn, requesting the "p2p" protocol. We ignore errors since it's
+just a demo.
 
 ---
 
@@ -460,8 +684,6 @@ Whenever a message arrives on stdin, we dispatch it:
 ```rust
 let stdin = spawn_stdin_stream_unbounded()
     .for_each(move |msg| {
-        ... // The actual code is long because we need to
-            // handle line breaks
         floodsub_ctl.publish(&topic, msg.into_bytes());
         Ok(())
     });
@@ -471,6 +693,7 @@ Whenever a message is received through floodsub, we write it to stdout:
 
 ```rust
 let floodsub_rx = floodsub_rx.for_each(|msg| {
+    // If the message is invalid UTF-8 we ignore it
     if let Ok(msg) = String::from_utf8(msg.data) {
         info!("< {}", msg);
     }
@@ -478,31 +701,40 @@ let floodsub_rx = floodsub_rx.for_each(|msg| {
 });
 ```
 
+???
+
+This is different to the code in the demo repository because the demo code
+handles line breaks properly. Essentially this sends each line from stdin to
+*floodsub* and tells *floodsub* to send it out to the network.
+
 ---
 
 # Walkthrough 9: group everything and run
 
-Rust-libp2p is fully asynchronous. Everything we did so far only performs initializations,
-and doesn't actually do anything. We now start everything.
+`rust-libp2p` is fully asynchronous.
 
-This is done by grouping everything into one `final_future`, and running it:
+To run this code, we group it together and pass it into the `core`.
 
 ```rust
 let final_future = swarm_future
-    .select(floodsub_rx)
-        .map_err(|(err, _)| err).map(|((), _)| ())
-    .select(stdin)
-        .map_err(|(err, _)| err).map(|((), _)| ())
-    .select(finished_enum)
-        .map_err(|(err, _)| err).and_then(|((), n)| n)
-    .select(kad_init)
-        .map_err(|(err, _)| err).and_then(|((), n)| n);
+    .select(floodsub_rx).discard()
+    .select(stdin).discard()
+    .select(finished_enum).discard()
+    .select(kad_init).discard()
 
 core.run(final_future).unwrap();
 ```
 
-**Note**: This code is very tokio-heavy and thus can be confusing if you're not familiar with
-this library.
+???
+
+`rust-libp2p` is fully asynchronous. Everything we did so far just creates the
+configuration, defining how we handle incoming connections and which protocols
+we support initializations, and doesn't actually do anything. We now start
+everything.
+
+This is done by grouping everything into one future, and running it. This is
+similar to the `select` keyword in Go - it creates a future that runs many
+futures in parallel, ending when any of them end:
 
 ---
 
@@ -510,23 +742,33 @@ this library.
 
 The same code can be compiled for asmjs or wasm and run in the browser.
 
-A few adjustements are required:
+A few adjustments are required:
 
-- Building the `transport`, as we cannot use TCP/IP.
-- Running the final future is more complicated because of the cooperating threading model used
-  by JavaScript (see http://bit.ly/2FZU3wQ).
+- Building the set of available transports.
+- Running the final future (see [this gist](http://bit.ly/2FZU3wQ) for an
+  explanation and workaround).
 
 Other than that, it's just:
 
 ```sh
-cargo b --target=asmjs-unknown-emscripten
+cargo build --target=asmjs-unknown-emscripten
 ```
 
 Or:
 
 ```sh
-cargo b --target=wasm32-unknown-emscripten
+cargo build --target=wasm32-unknown-emscripten
 ```
+
+???
+
+- Building the set of available transports, as we cannot use TCP/IP (we just use
+  websockets instead). This doesn't make a browser node incompatible with a
+  desktop node, since they only need to share a single transport in order to
+  communicate and the desktop nodes support websockets.
+- Running the final future is more complicated because JavaScript doesn't have
+  "true" threads (for the curious and Rust-savvy, you can see the linked gist
+  for an explanation and a workaround).
 
 ---
 class: center, middle
