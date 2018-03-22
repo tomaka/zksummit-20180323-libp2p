@@ -273,6 +273,21 @@ known.
 
 ---
 
+# Why Rust?
+
+- Allows us to write code that is as readable and maintainable as code in
+  any modern language but is as efficient as a hand-rolled C implementation.
+- We can get fine-grained control over resource use. This is useful, as a
+  peer-to-peer system is more vulnerable to resource exhaustion attacks than
+  in a client-server model.
+- Rust can easily be called into from other languages in a way that is
+  impossible or impractical in languages like Go and JavaScript.
+- Rust's strict type system and ownership model means that we can get a better
+  understanding of the structure of libp2p itself, making it easier to port to
+  other languages like Haskell which may be stricter than Go and JavaScript.
+
+---
+
 # Designing a small chat application
 
 Let's write a small peer-to-peer application that allows all the members of the
