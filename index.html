@@ -364,6 +364,14 @@ network to chat together.
 
 How it all plugs together:
 
+- Start peer discovery from bootstrap nodes.
+- Generate or load a keypair at startup.
+- Discover new peers using *kademlia*.
+- Open *floodsub* connections to closest nodes.
+- Write received messages to stdout and send messages from stdin to the network.
+
+???
+
 - When they start, nodes have absolutely no idea how to access other nodes. In
   order to be able to function, we need to have a list of *bootstrap nodes*.
 - When a node starts, it generates a key pair for itself or loads an existing
@@ -401,7 +409,6 @@ let bootstrap_peer_id = BOOTSTRAP_ID;
 // This creates a peerstore in-process
 let peer_store = Arc::new(MemoryPeerstore::empty());
 
-// The `is_bootstrap` flag would probably be passed on the command line
 if !is_bootstrap {
 // Add bootstrap node to peer store
     peer_store
@@ -424,6 +431,8 @@ let my_peer_id = if is_bootstrap {
 ???
 
 Nodes have two modes: bootstrap, or not.
+
+The `is_bootstrap` flag would probably be passed on the command line.
 
 We create what is called a *peerstore*, and store the bootstrap node in it
 (unless we are the bootstrap node). The *peerstore* is a database of node
@@ -461,13 +470,18 @@ let mut core = tokio_core::reactor::Core::new().unwrap();
 
 let without_identify =
     // `Ws` first, `Tcp` if that fails.
-    WsConfig::new(TcpConfig::new(core.handle())).or_transport(TcpConfig::new(core.handle()))
+    WsConfig::new(TcpConfig::new(core.handle()))
+        .or_transport(TcpConfig::new(core.handle()))
         // Plain-text "encryption".
         .with_upgrade(PlainTextConfig)
         // Multiplexing
-        .with_upgrade(BufferedMplexConfig::<[_; 256]>::new()).into_connection_reuse();
+        .with_upgrade(BufferedMplexConfig::<[_; 256]>::new())
+        .into_connection_reuse();
 
-let transport = IdentifyTransport::new(without_identify, peer_store.clone());
+let transport = IdentifyTransport::new(
+    without_identify,
+    peer_store.clone(),
+);
 ```
 
 ???
@@ -487,7 +501,7 @@ the `peer_store`.
 
 ---
 
-# Walkthrough #3: prepare the configuration for the top-level protocols
+# Walkthrough #3: configure top-level protocols
 
 We prepare the configuration for the top-level protocols that the server will
 handle: *identify*, *kademlia* and *floodsub*.
@@ -626,9 +640,6 @@ them.
 
 # Walkthrough #7: perform a Kademlia node find
 
-We use the `swarm_controller` to perform a Kademlia node find, and connect to all the nodes that
-are closest to ours.
-
 ```rust
 // Create controller for *kademlia*
 let (kad_controller, kad_init) =
@@ -656,6 +667,9 @@ let finished_enum = kad_controller
 ```
 
 ???
+
+We use the `swarm_controller` to perform a Kademlia node find, and connect to
+all the nodes that are closest to ours.
 
 We ask *kademlia* for the nodes closest to us. Then we take these nodes and dial
 each of them in turn, requesting the "p2p" protocol. We ignore errors since it's
