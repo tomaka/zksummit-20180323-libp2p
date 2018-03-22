@@ -202,11 +202,6 @@ Three protocols exist:
     <img src="multiplexing.svg" alt="" />
 </div>
 
-Multiplexing allows both nodes to open multiple substreams on a single
-connection, where each of these substreams uses a different protocol and is
-treated as if it was separate connection. The extra overhead for these
-substreams is minimal.
-
 ???
 
 - *yamux*, only implemented in Go
@@ -217,6 +212,11 @@ substreams is minimal.
 - *mplex*, implemented in Go, JavaScript and now Rust
   - Originally written as an ad-hoc spec in JavaScript but is now de-facto
     standardised due to its reimplementation in JS and Rust.
+
+Multiplexing allows both nodes to open multiple substreams on a single
+connection, where each of these substreams uses a different protocol and is
+treated as if it was separate connection. The extra overhead for these
+substreams is minimal.
 
 ---
 
@@ -395,26 +395,15 @@ Demo code can be found here: TODO
 
 # Walkthrough #1: Initialization
 
-Nodes have two modes: bootstrap, or not.
-
-We create what is called a *peerstore*, and store the bootstrap node in it (unless we are the
-bootstrap node). The *peerstore* is a database of node information.
-
 ```rust
-// For this ID we'd just use some hardcoded value. The only thing that matters
-// is that it doesn't clash with the IDs of the other nodes
 let bootstrap_peer_id = BOOTSTRAP_ID;
 
-// This creates a peerstore in-process (i.e. it's not stored on disk and will
-// be destroyed when the process quits
+// This creates a peerstore in-process
 let peer_store = Arc::new(MemoryPeerstore::empty());
 
 // The `is_bootstrap` flag would probably be passed on the command line
 if !is_bootstrap {
-    // This adds the bootstrap node's ID to the peer store with a hardcoded IP
-    // address. We only have a single bootstrap node for this demo but in a real
-    // application you'd have many, so that if one or more bootstrap nodes go
-    // down then you can still connect to the network.
+// Add bootstrap node to peer store
     peer_store
         .peer_or_create(&bootstrap_peer_id)
         .add_addr("/ip4/127.0.0.1/tcp/10101".parse().unwrap(),
@@ -422,21 +411,68 @@ if !is_bootstrap {
 }
 
 let my_peer_id = if is_bootstrap {
-    // If we're the bootstrap node then our peer ID is the hardcoded value
-    // (since we only have one bootstrap node then this is simple).
+    // Hardcoded peer ID
     bootstrap_peer_id
 } else {
-    // Otherwise, we generate a key using `/dev/urandom` (or the equivalent on
-    // other platforms).
+    // Otherwise, we generate a key
     let key = (0..2048).map(|_| rand::random::<u8>())
                        .collect::<Vec<_>>();
     PeerId::from_public_key(&key)
 };
 ```
 
+???
+
+Nodes have two modes: bootstrap, or not.
+
+We create what is called a *peerstore*, and store the bootstrap node in it
+(unless we are the bootstrap node). The *peerstore* is a database of node
+information.
+
+For the bootstrap node's ID we'd just use some hardcoded value. The only thing
+that matters is that it's unique and that all nodes agree on its value.
+
+We use an in-process peerstore (i.e. it's not stored on disk and will be
+destroyed when the process quits)
+
+This adds the bootstrap node's ID to the peer store with a hardcoded IP address.
+We only have a single bootstrap node for this demo but in a real application
+you'd have many, so that if one or more bootstrap nodes go down then you can
+still connect to the network.
+
+If we're the bootstrap node then our peer ID is a hardcoded value (since we only
+have one bootstrap node then this is simple)
+
+We generate a key using `/dev/urandom`.
+
 ---
 
 # Walkthrough #2: Build the transport
+
+This is the core of the configuration of libp2p.
+
+We configure low-level transports, add dummy encryption, and configure
+*identify* on top.
+
+The Rust code to do this looks like this:
+
+```rust
+let mut core = tokio_core::reactor::Core::new().unwrap();
+
+let without_identify =
+    // `Ws` first, `Tcp` if that fails.
+    WsConfig::new(TcpConfig::new(core.handle())).or_transport(TcpConfig::new(core.handle()))
+        // Plain-text "encryption".
+        .with_upgrade(PlainTextConfig)
+        // Multiplexing
+        .with_upgrade(BufferedMplexConfig::<[_; 256]>::new()).into_connection_reuse();
+
+let transport = IdentifyTransport::new(without_identify, peer_store.clone());
+```
+
+???
+
+`core` allows us to run libp2p asynchronously.
 
 This is the core of the configuration of libp2p. Essentially, it defines the
 configuration of protocols that libp2p supports. We want to be able to use the
@@ -449,24 +485,6 @@ Lastly, we add *identify* on top. This means that nodes are automatically
 identified when we connect to them and their node IDs determined and stored in
 the `peer_store`.
 
-The Rust code to do this looks like this:
-
-```rust
-// This allows us to run libp2p asynchronously
-let mut core = tokio_core::reactor::Core::new().unwrap();
-
-let without_identify =
-    // This tries to connect over `Ws` (websockets) first and then `Tcp` (TCP/IP) if that
-    // fails.
-    WsConfig::new(TcpConfig::new(core.handle())).or_transport(TcpConfig::new(core.handle()))
-        // Then, we add our plain-text "encryption".
-        .with_upgrade(PlainTextConfig)
-        // Then we add multiplexing over the top.
-        .with_upgrade(BufferedMplexConfig::<[_; 256]>::new()).into_connection_reuse();
-
-let transport = IdentifyTransport::new(without_identify, peer_store.clone());
-```
-
 ---
 
 # Walkthrough #3: prepare the configuration for the top-level protocols
@@ -478,8 +496,7 @@ handle: *identify*, *kademlia* and *floodsub*.
 // We create the configuration for *floodsub*
 let (floodsub, fs_rx) = FloodSubUpgrade::new(my_peer_id.clone());
 
-// We create the configuration for *kademlia* (plus the controller that allows us to send
-// commands and receive data from the network).
+// Configure *kademlia*
 let kad_cfg = KademliaConfig {
     parallelism: 3,
     peer_store: peer_store,
@@ -489,7 +506,7 @@ let kad_cfg = KademliaConfig {
 let kad_ctl_proto = KademliaControllerPrototype::new(kad_cfg);
 let kad_upgrade = KademliaUpgrade::from_prototype(&kad_ctl_proto);
 
-// This creates
+// Combine the three protocols
 let protocols_configuration = ConnectionUpgrader {
     kad: kad_upgrade,
     identify: libp2p_identify::IdentifyProtocolConfig,
@@ -497,22 +514,29 @@ let protocols_configuration = ConnectionUpgrader {
 };
 ```
 
+???
+
+We create the configuration for *kademlia* (plus the controller that allows us
+to send commands and receive data from the network).
+
+Finally, we create an instance of a custom struct that allows us to implement
+all three top-level protocols simultaneously.
+
 ---
 
 # Walkthrough #4: build the swarm
-
-We now create what is called a *swarm*. This is the object that will manage all
-the active connections. It's the central engine by which everything in libp2p is
-driven.
 
 ```rust
 let (swarm_controller, swarm_future) = libp2p_swarm::swarm(
     transport, protocols_configuration, |upgrade, client_addr| {
         match upgrade {
+            // *kademlia*
             Protocol::Kad(kad) => Box::new(kad) as Box<_>,
+            // *floodsub*
             Protocol::FloodSub(future) => {
                 Box::new(future) as Box<_>
             },
+            // *identify*
             Protocol::Identify(id) => {
                 match id {
                     IdentifyOutput::Sender { sender, .. }) => {
@@ -529,6 +553,18 @@ let (swarm_controller, swarm_future) = libp2p_swarm::swarm(
 );
 ```
 
+???
+
+We now create what is called a *swarm*. This is the object that will manage all
+the active connections. It's the central engine by which everything in libp2p is
+driven.
+
+Our custom struct produces an enum. If you don't know Rust, all you need to know
+is that we can handle values from each of *kademlia*, *floodsub* and *identify*
+seperately. If we only used one top-level protocol then we would only receive
+the values from that protocol, our custom struct simply gathers up all the
+values from all the protocols and turns it into a single value.
+
 ---
 
 # Walkthrough #5: start listening
@@ -536,12 +572,11 @@ let (swarm_controller, swarm_future) = libp2p_swarm::swarm(
 We ask the `swarm_controller` to start listening for incoming connections.
 
 ```rust
-// If we're the bootstrap node, we start listening on a hardcoded port so that other nodes
-// can find us. For now we only listen on TCP/IP but we can listen on multiple ports if
-// we want to.
 let addr: Multiaddr = if is_bootstrap {
+    // Hardcoded port
     "/ip4/0.0.0.0/tcp/10101".parse().unwrap()
 } else {
+    // Let OS choose port
     "/ip4/0.0.0.0/tcp/0".parse().unwrap()
 };
 
@@ -550,21 +585,27 @@ let actual_addr = swarm_controller.listen_on(addr.clone())
 info!("Now listening on {}", actual_addr);
 ```
 
+???
+
+If we're the bootstrap node, we start listening on a hardcoded port so that
+other nodes can find us. For now we only listen on TCP/IP but we could listen on
+multiple protocols if we wanted to.
+
+We pass this address into the swarm controller, which then returns the "real"
+address. This replaces the IP address with our real IP address and the port with
+our real port.
+
 ---
 
 # Walkthrough #6: subscribe to a floodsub topic
 
 Having a swarm controller makes it possible to perform actions on the network by
-sending commands to the top-level protocols. Here, we create a controller that
-sends messages to *floodsub* and use it to ask *floodsub* to subscribe to a
-topic. This will tell everyone we are connected to and will connect to that we
-want to receive messages for this topic. For now we're not connected to anyone,
-but when we do we'll communicate our topics to them.
+sending commands to the top-level protocols. 
 
 ```rust
 let topic = TopicBuilder::new("chat").build();
 
-// Here we create the controller for *floodsub*
+// Create controller for *floodsub*
 let floodsub_ctl = FloodSubController::new(
     &floodsub_upgrade,
     swarm_controller.clone(),
@@ -572,6 +613,14 @@ let floodsub_ctl = FloodSubController::new(
 
 floodsub_ctl.subscribe(&topic);
 ```
+
+???
+
+Here, we create a controller that sends messages to *floodsub* and use it to ask
+*floodsub* to subscribe to a topic. This will tell everyone we are connected to
+and will connect to that we want to receive messages for this topic. For now
+we're not connected to anyone, but when we do we'll communicate our topics to
+them.
 
 ---
 
@@ -581,24 +630,36 @@ We use the `swarm_controller` to perform a Kademlia node find, and connect to al
 are closest to ours.
 
 ```rust
-// Here we create the controller for *kademlia*
+// Create controller for *kademlia*
 let (kad_controller, kad_init) =
     kad_ctl_proto.start(swarm_controller.clone());
 
 let finished_enum = kad_controller
+    // Ask for closest nodes
     .find_node(my_peer_id.clone())
     .and_then(move |out| {
         let local_hash = U512::from(my_peer_id.hash());
+
+        // Dial to the nodes
         for n in out {
             let addr = AddrComponent::P2P(n.into_bytes()).into();
+
+            // Ignore errors
             let _ = swarm_controller.dial_to_handler(
                 addr,
                 floodsub_upgrade.clone(),
             );
         }
+
         Ok(())
     });
 ```
+
+???
+
+We ask *kademlia* for the nodes closest to us. Then we take these nodes and dial
+each of them in turn, requesting the "p2p" protocol. We ignore errors since it's
+just a demo.
 
 ---
 
@@ -609,9 +670,6 @@ Whenever a message arrives on stdin, we dispatch it:
 ```rust
 let stdin = spawn_stdin_stream_unbounded()
     .for_each(move |msg| {
-        // This is different to the code in the demo repository because the demo code handles line
-        // breaks properly. Essentially this sends each line from stdin to *floodsub* and tells
-        // *floodsub* to send it out to the network.
         floodsub_ctl.publish(&topic, msg.into_bytes());
         Ok(())
     });
@@ -629,18 +687,19 @@ let floodsub_rx = floodsub_rx.for_each(|msg| {
 });
 ```
 
+???
+
+This is different to the code in the demo repository because the demo code
+handles line breaks properly. Essentially this sends each line from stdin to
+*floodsub* and tells *floodsub* to send it out to the network.
+
 ---
 
 # Walkthrough 9: group everything and run
 
-`rust-libp2p` is fully asynchronous. Everything we did so far just creates the
-configuration, defining how we handle incoming connections and which protocols
-we support initializations, and doesn't actually do anything. We now start
-everything.
+`rust-libp2p` is fully asynchronous.
 
-This is done by grouping everything into one future, and running it. This is
-similar to the `select` keyword in Go - it creates a future that runs many
-futures in parallel, ending when any of them end:
+To run this code, we group it together and pass it into the `core`.
 
 ```rust
 let final_future = swarm_future
@@ -652,6 +711,17 @@ let final_future = swarm_future
 core.run(final_future).unwrap();
 ```
 
+???
+
+`rust-libp2p` is fully asynchronous. Everything we did so far just creates the
+configuration, defining how we handle incoming connections and which protocols
+we support initializations, and doesn't actually do anything. We now start
+everything.
+
+This is done by grouping everything into one future, and running it. This is
+similar to the `select` keyword in Go - it creates a future that runs many
+futures in parallel, ending when any of them end:
+
 ---
 
 # Misc: running the same code in the browser
@@ -660,13 +730,9 @@ The same code can be compiled for asmjs or wasm and run in the browser.
 
 A few adjustments are required:
 
-- Building the set of available transports, as we cannot use TCP/IP (we just use
-  websockets instead). This doesn't make a browser node incompatible with a
-  desktop node, since they only need to share a single transport in order to
-  communicate and the desktop nodes support websockets.
-- Running the final future is more complicated because JavaScript doesn't have
-  "true" threads (for the curious and Rust-savvy, you can see [this
-  gist](http://bit.ly/2FZU3wQ) for an explanation and a workaround).
+- Building the set of available transports.
+- Running the final future (see [this gist](http://bit.ly/2FZU3wQ) for an
+  explanation and workaround).
 
 Other than that, it's just:
 
@@ -679,6 +745,16 @@ Or:
 ```sh
 cargo build --target=wasm32-unknown-emscripten
 ```
+
+???
+
+- Building the set of available transports, as we cannot use TCP/IP (we just use
+  websockets instead). This doesn't make a browser node incompatible with a
+  desktop node, since they only need to share a single transport in order to
+  communicate and the desktop nodes support websockets.
+- Running the final future is more complicated because JavaScript doesn't have
+  "true" threads (for the curious and Rust-savvy, you can see the linked gist
+  for an explanation and a workaround).
 
 ---
 class: center, middle
