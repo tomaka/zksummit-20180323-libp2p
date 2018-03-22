@@ -99,10 +99,13 @@ class: center, middle
   connections over TCP-IP
 - Supporting additional transports requires a huge overhaul of the protocol and
   significant development work
-- This means that, for example, a node running in a browser cannot connect to a
-  node running in the cloud, or that proxying support must be baked into
-  the protocol itself
 - libp2p attempts to fix this by being pluggable from the very start
+
+???
+
+- (after second point): this means that, for example, a node running in a
+  browser cannot connect to a node running in the cloud, or that proxying
+  support must be baked into the protocol itself
 
 ---
 
@@ -117,17 +120,32 @@ transports and which protocols to use.
 Examples:
 
 - `/ip4/80.129.4.75/tcp/8200`
+- `/ip4/80.129.4.75/tcp/8200/ws`
 - `/ip6/2001:db8:a0b:12f0::1/tcp/3050`
 - `/onion/timaq4ygg2iegci7:80/http`
 - `/dns/example.com/tcp/5000`
 - `/ip4/125.90.85.23/tcp/5000/p2p-circuit/ip4/90.2.98.122/tcp/9001`
 
-libp2p nodes can communicate with each other entirely through WebSockets
-(meaning that we can run a JavaScript or WASM libp2p node inside a browser),
-IPC, even within-process communication. The only restriction is that it must be
-able to transport a continuous stream of bytes. Unfortunately, this does rule
-out UDP. This restriction is only to make writing protocol implementations for
-libp2p easier, and could be lifted in the future.
+libp2p nodes can communicate with each other through TCP/IP, WebSockets, unix
+pipes, and much more.
+
+???
+
+- `/ip4/80.129.4.75/tcp/8200` (TCP/IPv4)
+- `/ip4/80.129.4.75/tcp/8200/ws` (websockets)
+- `/ip6/2001:db8:a0b:12f0::1/tcp/3050` (TCP/IPv6)
+- `/onion/timaq4ygg2iegci7:80/http` (Onion routing/Tor network)
+- `/dns/example.com/tcp/5000` (DNS)
+- `/ip4/125.90.85.23/tcp/5000/p2p-circuit/ip4/90.2.98.122/tcp/9001` (TCP/IPv4
+  with a proxy that is contacted using TCP/IPv4)
+
+- Websockets means that we can run a JavaScript or WASM libp2p node inside a
+  browser
+- Restriction: must be able to transport a continuous stream of bytes (only to
+  make writing protocol implementations for libp2p easier, and could be lifted
+  in the future)
+- Restriction rules out UDP without some layer over the top that adds in-order
+  reliable messaging to UDP like UDT.
 
 ---
 
@@ -140,6 +158,8 @@ Example communications between two nodes:
 
 <img src="multistream-select.png" alt="" />
 
+???
+
 In this example, we negotiate the protocol `/plaintext/1.0.0`, then the protocol
 `/mplex/6.7.0`.
 
@@ -149,18 +169,22 @@ In this example, we negotiate the protocol `/plaintext/1.0.0`, then the protocol
 
 The first protocol negotiated when a connection is open is the security layer.
 
-Right now, only two protocols exist:
+Right now, two protocols exist:
+- *plaintext*
+- *secio*
+
+We probably don't need more any time soon, *secio* is very flexible.
+
+???
+
 - *plaintext*, a basic pass-through protocol. Useful for debugging.
 - *secio*, that provides full end-to-end encryption.
-
-## Secio
-
-Standard Diffie-Hellman key exchange.
-
-The cipher, hash function, and key exchange algorithm are not hardcoded in the
-protocol, and are also negotiated between the two nodes during the *secio*
-handshake. This means we can incrementally upgrade nodes if the existing hash
-function is found to be lacking.
+- This is roughly analogous to HTTP vs HTTPS - the data transferred is the same,
+  but in one the data is encrypted.
+- In *secio*, the cipher, hash function, and key exchange algorithm are not
+  hardcoded in the protocol, and are also negotiated between the two nodes
+  during the *secio* handshake. This means we can incrementally upgrade nodes if
+  the existing hash function is found to be lacking.
 
 ---
 
@@ -170,9 +194,9 @@ On top of the security layer, the second protocol that is negotiated is the
 multiplexing layer.
 
 Three protocols exist:
-- *mplex* (implemented in Go, JavaScript and now Rust)
-- *yamux* (only implemented in Go)
-- *spdy* (only implemented in JavaScript)
+- *yamux*
+- *spdy*
+- *mplex*
 
 <div style="text-align:center">
     <img src="multiplexing.svg" alt="" />
@@ -183,13 +207,39 @@ connection, where each of these substreams uses a different protocol and is
 treated as if it was separate connection. The extra overhead for these
 substreams is minimal.
 
+???
+
+- *yamux*, only implemented in Go
+- *spdy*, only implemented in JavaScript (actually implemented in a few
+  languages but only JS has it available as a libp2p multiplexing solution)
+  - Google's multiplexing solution that is the basis for how HTTP/2 implements
+    multiplexing
+- *mplex*, implemented in Go, JavaScript and now Rust
+  - Originally written as an ad-hoc spec in JavaScript but is now de-facto
+    standardised due to its reimplementation in JS and Rust.
+
 ---
 
-# Final protocols
+# Top-level protocols
 
-In each multiplexed substream, a final protocol is negotiated.
+In each multiplexed substream, a top-level protocol is negotiated.
 
-Example of some protocols implemented in JS, Go and Rust:
+Example of some protocols:
+
+- *ping*
+- *identify*
+- *floodsub*
+- *kademlia*
+- etc.
+
+Or you can also create your own protocol, which is often what you want.
+
+Example:
+
+- IPFS uses the *bitswap* protocol.
+- Polkadot and Ethereum would also use their own custom protocol.
+
+???
 
 - *ping* - exactly what it says on the tin
 - *identify* - a protocol allowing nodes to express a unique identity
@@ -197,15 +247,11 @@ Example of some protocols implemented in JS, Go and Rust:
 - *kademlia* - decentralised peer discovery and record storage
 - etc.
 
-Or you can also create your own protocol, which is often what you want.
-
-Example:
-
 - IPFS uses the *bitswap* protocol (most of IPFS just leverages libp2p instead
   of requiring a custom implementation, this protocol just adds the concept of
   files on top).
-- Polkadot and the Parity Ethereum client would also use their own custom
-  protocol.
+- Mention that Parity intends to implement libp2p as a secondary communication
+  mechanism to their existing TCP-only solution.
 
 ---
 
@@ -222,6 +268,8 @@ These information include:
 - The version of libp2p the node implements.
 - The top-level protocol that the node wants (eg. "ipfs", "polkadot")
 
+???
+
 **Note**: A common situation is that A dials B, then B opens a multiplexed
   substream to A and negotiates the *identify* protocol on it. It is then A that
   sends information about itself to B, allowing B to learn about A.
@@ -232,21 +280,26 @@ These information include:
 
 Publish-subscribe protocol.
 
-The *floodsub* protocol allows you to broadcast messages over the network. A
-node can send a message to another node through this protocol, and the message
-will then be broadcasted to all the other nodes it is connected to.
+The *floodsub* protocol allows you to broadcast messages over the network.
 
-Each message has a topic. Nodes subscribe to specific topics and only receive
-messages that match the topic they are registered to.
+Each message has a topic. Nodes subscribe to specific topics and will discard
+messages that do not match any of the topics they are registered to.
 
 Example usages:
 
 - Messages in a chat application.
 - Broadcasting new blocks in a blockchain.
-- Moves in a turn-based strategy game
+- Moves in a turn-based strategy game.
 
-Messages can be signed in order to prove the author, but that is out of scope of
-the protocol itself.
+Messages can be signed in order to prove the author.
+
+???
+
+What this means is that a node will send a message to all the nodes it knows
+about, and then these nodes will send the message to all the nodes _they_ care
+about, and so forth.
+
+Signing is currently unimplemented in the Rust implementation of *floodsub*
 
 ---
 
@@ -254,26 +307,42 @@ the protocol itself.
 
 Kademlia is a Distributed Hash Table (DHT).
 
-A DHT is similar to a traditional hash table, except that each node only stores
-a subset of the entries. The entries that a node stores are determined based on
-its public key. This ensures a relatively-good distribution of entries without
-central coordination.
+A DHT is similar to a traditional hash table, with each node acting like a
+bucket, except the nodes can share elements whereas entries tend to belong to
+precisely one hash table bucket.
 
-Each node that supports kademlia manages two DHTs: one for information about
-peers, and one for arbitrary records that any node of the network can insert.
-These arbitrary records expire after a while.
+Each node that supports kademlia manages two DHTs: one for peers, and one for
+data.
 
 When a node joins the network, it notifies the nodes it connects to in order to
 get inserted in the peers' hash table. If we choose a list of "bootstrap" nodes
 that are known about before connecting to the network, we can use these to
-incrementally discover every node on the network. These bootstrap nodes do not
-need to be special, or owned by the libp2p developers. They simply need to be
-nodes that are already connected to the network and whose addresses are already
-known.
+incrementally discover every node on the network.
+
+???
+
+The entries that a node stores are determined based on
+its public key. This ensures a relatively-good distribution of entries without
+central coordination.
+
+The data records are totally arbitrary and can have basically any key and any
+value. Similarly to a K/V store like Redis, records in both the peer and data
+stores expire after some amount of time.
+
+These bootstrap nodes do not need to be special, or owned by the libp2p
+developers. They simply need to be nodes that are already connected to the
+network and whose addresses are already known.
 
 ---
 
 # Why Rust?
+
+- Efficient but readable.
+- Control over resources and resource use.
+- Can write bindings into Rust from other languages.
+- Strict types and strict ownership system.
+
+???
 
 - Allows us to write code that is as readable and maintainable as code in
   any modern language but is as efficient as a hand-rolled C implementation.
